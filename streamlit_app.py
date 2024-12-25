@@ -1,18 +1,13 @@
 import streamlit as st
-from langchain.llms import OpenAI
-st.set_page_config(page_title="Quickstart Career App")
-st.title('Quickstart Career App')
+from src.quickstart import quickstart_app
+from src.file_upload import file_upload_app
 
-openai_api_key = st.sidebar.text_input('OpenAI API Key')
+# Set up navigation
+st.sidebar.title("Navigation")
+app_mode = st.sidebar.radio("Go to", ["Quickstart App", "Upload & RAG"])
 
-def generate_response(input_text):
-  llm = OpenAI(temperature=0.7, openai_api_key=openai_api_key)
-  st.info(llm(input_text))
-
-with st.form('my_form'):
-  text = st.text_area('Enter text:', 'What are the three key pieces of advice for learning how to code?')
-  submitted = st.form_submit_button('Submit')
-  if not openai_api_key.startswith('sk-'):
-    st.warning('Please enter your OpenAI API key!', icon='⚠')
-  if submitted and openai_api_key.startswith('sk-'):
-    generate_response(text)
+# Display the selected app
+if app_mode == "Quickstart App":
+    quickstart_app()
+elif app_mode == "Upload & RAG":
+    file_upload_app()
