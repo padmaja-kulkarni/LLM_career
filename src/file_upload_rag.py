@@ -1,23 +1,24 @@
 import os
 import streamlit as st
 from langchain.chains import RetrievalQA
-from langchain.vectorstores import Chroma
+from langchain.document_loaders import PyPDFLoader
+from langchain.vectorstores import FAISS
 from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.llms import OpenAI
 from docx import Document
-from PyPDF2 import PdfReader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.chat_models import ChatOpenAI
 import yaml
-from langchain.schema import Document
 
+import yaml
+import os
 
-persist_directory = "../storage"
 
 def load_config(file_name="config.yaml"):
     """
     Load configuration file from the 'config/' directory, relative to the project root.
     """
+    # Determine the project root dynamically
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # Build the path to the config file
     config_path = os.path.join(project_root, "config", file_name)
 
     try:
@@ -26,32 +27,37 @@ def load_config(file_name="config.yaml"):
     except FileNotFoundError:
         raise FileNotFoundError(f"Configuration file not found at {config_path}")
 
-
 def load_file(uploaded_file):
     """
-    Load uploaded files into a LangChain-compatible format.
+    Load uploaded files into a LangChain-compatible loader.
     Supports PDF, DOCX, and TXT files.
     """
     if uploaded_file.type == "application/pdf":
-        reader = PdfReader(uploaded_file)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text()
-        documents = [Document(page_content=text, metadata={})]
+        # Save PDF temporarily and load it
+        with open("temp.pdf", "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        loader = PyPDFLoader("temp.pdf")
+        documents = loader.load()
     elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        # Process DOCX file
         doc = Document(uploaded_file)
         text = "\n".join([paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()])
-        documents = [Document(page_content=text, metadata={})]
+        documents = [{"content": text, "metadata": {}}]
     elif uploaded_file.type == "text/plain":
+        # Process plain text file
         text = uploaded_file.read().decode("utf-8")
-        documents = [Document(page_content=text, metadata={})]
+        documents = [{"content": text, "metadata": {}}]
     else:
         raise ValueError("Unsupported file type")
     return documents
 
+
 def file_upload_app():
-    st.title("Upload File and Use RAG")
+    st.title("📄 Upload File and Use RAG")
+
+    # Read API key from config file
     openai_api_key = load_config()
+
     with st.sidebar:
         if not openai_api_key:
             openai_api_key = st.text_input("OpenAI API Key", type="password")
@@ -63,49 +69,58 @@ def file_upload_app():
 
     if uploaded_file and openai_api_key:
         st.info("Processing the file...")
+
         try:
+            # Load and process the uploaded file
             documents = load_file(uploaded_file)
             st.success("File successfully loaded!")
         except Exception as e:
             st.error(f"Failed to load file: {str(e)}")
             return
 
+        # Embed documents and set up vector store
         embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1024, chunk_overlap=50)
-        texts = text_splitter.split_documents(documents)
-        vectordb = Chroma.from_documents(documents=texts, embedding=embeddings, persist_directory=persist_directory)
-        vectordb.persist()
-        retriever = vectordb.as_retriever(search_kwargs={"k": 3})
-        llm = ChatOpenAI(model_name='gpt-4', openai_api_key=openai_api_key)
+        vectorstore = FAISS.from_documents(documents, embeddings)
 
-        if st.button("Generate Summary"):
-            try:
-                summary_chain = RetrievalQA.from_chain_type(llm=llm, chain_type="summarize", retriever=retriever)
-                summary = summary_chain.run("")
-                st.text_area("Document Summary:", summary)
-            except Exception as e:
-                st.error(f"Failed to generate summary: {str(e)}")
+        # Save vectorstore to disk (optional, for reuse)
+        vectorstore.save_local("local_vectorstore")
 
-        st.text_area("Ask a question based on the uploaded file:", "", key="query")
-        query = st.session_state.query
+        # Load vectorstore from disk (for demonstration of persistence)
+        vectorstore = FAISS.load_local("local_vectorstore", embeddings, allow_dangerous_deserialization=True)
 
+        # Create RAG chain
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 1})  # Reduce the number of retrieved chunks
+        llm = OpenAI(temperature=0.7, max_tokens=150, openai_api_key=openai_api_key)  # Limit response length
+
+        qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever)
+
+        # Ask questions based on the uploaded file
+        query = st.text_area("Ask a question based on the uploaded file:")
         if st.button("Get Answer"):
             if query.strip():
                 try:
-                    qa_chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
-                    response = qa_chain.run(query)
+                    retrieved_docs = retriever.get_relevant_documents(query)
+                    # Combine and clean retrieved content
+                    combined_content = " ".join([doc.page_content for doc in retrieved_docs])
+
+                    # Add structured context for LLM
+                    structured_prompt = f"""
+                    Based on the following CV information:
+                    {combined_content}
+
+                    {query}
+                    """
+                    st.text_area("Debug Prompt", structured_prompt)
+
+                    response = qa_chain.run(structured_prompt)
                     st.success(response)
                 except Exception as e:
                     st.error(f"Failed to generate a response: {str(e)}")
             else:
                 st.warning("Please enter a question!")
-
-        if st.button("View Full Document"):
-            full_text = "\n\n".join([doc['content'] for doc in documents])
-            st.text_area("Full Document Content", full_text)
-
     elif not openai_api_key:
         st.info("Please add your OpenAI API key to continue.")
+
 
 if __name__ == "__main__":
     file_upload_app()
