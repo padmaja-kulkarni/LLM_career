@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 from langchain.chains import RetrievalQA
 from langchain.document_loaders import PyPDFLoader
@@ -5,7 +6,26 @@ from langchain.vectorstores import FAISS
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.llms import OpenAI
 from docx import Document
+import yaml
 
+import yaml
+import os
+
+
+def load_config(file_name="config.yaml"):
+    """
+    Load configuration file from the 'config/' directory, relative to the project root.
+    """
+    # Determine the project root dynamically
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # Build the path to the config file
+    config_path = os.path.join(project_root, "config", file_name)
+
+    try:
+        with open(config_path, "r") as file:
+            return yaml.safe_load(file)['openai_api_key']
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Configuration file not found at {config_path}")
 
 def load_file(uploaded_file):
     """
@@ -35,9 +55,15 @@ def load_file(uploaded_file):
 def file_upload_app():
     st.title("📄 Upload File and Use RAG")
 
+    # Read API key from config file
+    openai_api_key = load_config()
+
     with st.sidebar:
-        openai_api_key = st.text_input("OpenAI API Key", type="password")
-        st.markdown("[Get an OpenAI API key](https://platform.openai.com/account/api-keys)")
+        if not openai_api_key:
+            openai_api_key = st.text_input("OpenAI API Key", type="password")
+            st.warning("No API key found in config file. Please enter it manually.")
+        else:
+            st.info("API key loaded from config file.")
 
     uploaded_file = st.file_uploader("Upload a file (PDF, DOCX, TXT)", type=["pdf", "docx", "txt"])
 
@@ -56,9 +82,16 @@ def file_upload_app():
         embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
         vectorstore = FAISS.from_documents(documents, embeddings)
 
+        # Save vectorstore to disk (optional, for reuse)
+        vectorstore.save_local("local_vectorstore")
+
+        # Load vectorstore from disk (for demonstration of persistence)
+        vectorstore = FAISS.load_local("local_vectorstore", embeddings, allow_dangerous_deserialization=True)
+
         # Create RAG chain
-        retriever = vectorstore.as_retriever()
-        llm = OpenAI(temperature=0.7, openai_api_key=openai_api_key)
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 1})  # Reduce the number of retrieved chunks
+        llm = OpenAI(temperature=0.7, max_tokens=150, openai_api_key=openai_api_key)  # Limit response length
+
         qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever)
 
         # Ask questions based on the uploaded file
@@ -66,7 +99,20 @@ def file_upload_app():
         if st.button("Get Answer"):
             if query.strip():
                 try:
-                    response = qa_chain.run(query)
+                    retrieved_docs = retriever.get_relevant_documents(query)
+                    # Combine and clean retrieved content
+                    combined_content = " ".join([doc.page_content for doc in retrieved_docs])
+
+                    # Add structured context for LLM
+                    structured_prompt = f"""
+                    Based on the following CV information:
+                    {combined_content}
+
+                    {query}
+                    """
+                    st.text_area("Debug Prompt", structured_prompt)
+
+                    response = qa_chain.run(structured_prompt)
                     st.success(response)
                 except Exception as e:
                     st.error(f"Failed to generate a response: {str(e)}")
