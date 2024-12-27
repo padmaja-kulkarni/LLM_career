@@ -52,7 +52,7 @@ def load_file(uploaded_file):
     return documents
 
 
-def file_upload_app():
+def file_upload_app_rag():
     st.title("📄 Upload File and Use RAG")
 
     # Read API key from config file
@@ -123,4 +123,4 @@ def file_upload_app():
 
 
 if __name__ == "__main__":
-    file_upload_app()
+    file_upload_app_rag()

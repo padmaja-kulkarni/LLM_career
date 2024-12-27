@@ -1,17 +1,10 @@
 import os
 import streamlit as st
-from langchain.chains import RetrievalQA
-from langchain.vectorstores import Chroma
-from langchain.embeddings.openai import OpenAIEmbeddings
 from docx import Document
 from PyPDF2 import PdfReader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chat_models import ChatOpenAI
 import yaml
-from langchain.schema import Document
 
-
-persist_directory = "../storage"
 
 def load_config(file_name="config.yaml"):
     """
@@ -29,29 +22,27 @@ def load_config(file_name="config.yaml"):
 
 def load_file(uploaded_file):
     """
-    Load uploaded files into a LangChain-compatible format.
+    Load uploaded files into text format.
     Supports PDF, DOCX, and TXT files.
     """
     if uploaded_file.type == "application/pdf":
         reader = PdfReader(uploaded_file)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text()
-        documents = [Document(page_content=text, metadata={})]
+        text = "".join([page.extract_text() for page in reader.pages])
     elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         doc = Document(uploaded_file)
         text = "\n".join([paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()])
-        documents = [Document(page_content=text, metadata={})]
     elif uploaded_file.type == "text/plain":
         text = uploaded_file.read().decode("utf-8")
-        documents = [Document(page_content=text, metadata={})]
     else:
         raise ValueError("Unsupported file type")
-    return documents
+    return text
 
-def file_upload_app():
-    st.title("Upload File and Use RAG")
+
+def process_combined_files_with_job_content():
+    st.title("Multi-File Analysis with Optional Job Content and Custom Questions")
+
     openai_api_key = load_config()
+
     with st.sidebar:
         if not openai_api_key:
             openai_api_key = st.text_input("OpenAI API Key", type="password")
@@ -59,53 +50,47 @@ def file_upload_app():
         else:
             st.info("API key loaded from config file.")
 
-    uploaded_file = st.file_uploader("Upload a file (PDF, DOCX, TXT)", type=["pdf", "docx", "txt"])
+    uploaded_files = st.file_uploader("Upload Files (PDF, DOCX, TXT)", type=["pdf", "docx", "txt"], accept_multiple_files=True)
 
-    if uploaded_file and openai_api_key:
-        st.info("Processing the file...")
-        try:
-            documents = load_file(uploaded_file)
-            st.success("File successfully loaded!")
-        except Exception as e:
-            st.error(f"Failed to load file: {str(e)}")
-            return
+    job_content = st.text_area("Enter Job Content (Optional):", height=150)
 
-        embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1024, chunk_overlap=50)
-        texts = text_splitter.split_documents(documents)
-        vectordb = Chroma.from_documents(documents=texts, embedding=embeddings, persist_directory=persist_directory)
-        vectordb.persist()
-        retriever = vectordb.as_retriever(search_kwargs={"k": 3})
-        llm = ChatOpenAI(model_name='gpt-4', openai_api_key=openai_api_key)
+    if uploaded_files and openai_api_key:
+        st.info("Processing all uploaded files together...")
 
-        if st.button("Generate Summary"):
+        combined_text = ""
+        for uploaded_file in uploaded_files:
             try:
-                summary_chain = RetrievalQA.from_chain_type(llm=llm, chain_type="summarize", retriever=retriever)
-                summary = summary_chain.run("")
-                st.text_area("Document Summary:", summary)
+                file_text = load_file(uploaded_file)
+                combined_text += f"\n\n--- Content from {uploaded_file.name} ---\n\n{file_text}"
             except Exception as e:
-                st.error(f"Failed to generate summary: {str(e)}")
+                st.error(f"Failed to load file '{uploaded_file.name}': {str(e)}")
 
-        st.text_area("Ask a question based on the uploaded file:", "", key="query")
-        query = st.session_state.query
+        if combined_text:
+            st.success("All files successfully loaded!")
+            st.text_area("Combined Content from All Files:", combined_text, height=100)
 
-        if st.button("Get Answer"):
-            if query.strip():
+            user_question = st.text_area("Ask a question about the content:", height=100)
+
+            if st.button("Get Answer"):
+                llm = ChatOpenAI(model_name='gpt-4', openai_api_key=openai_api_key)
+
                 try:
-                    qa_chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
-                    response = qa_chain.run(query)
-                    st.success(response)
-                except Exception as e:
-                    st.error(f"Failed to generate a response: {str(e)}")
-            else:
-                st.warning("Please enter a question!")
+                    # Prepare the prompt
+                    prompt = f"Using the following combined content, answer the user's question."
+                    if job_content.strip():
+                        prompt += f"\n\nJob Content:\n{job_content}"
+                    prompt += f"\n\nCombined Content from Files:\n{combined_text}\n\nQuestion: {user_question}"
 
-        if st.button("View Full Document"):
-            full_text = "\n\n".join([doc['content'] for doc in documents])
-            st.text_area("Full Document Content", full_text)
+                    # Generate response
+                    response = llm.predict(prompt)
+
+                    st.text_area("Answer:", response, height=300)
+                except Exception as e:
+                    st.error(f"Failed to generate response: {str(e)}")
 
     elif not openai_api_key:
         st.info("Please add your OpenAI API key to continue.")
 
+
 if __name__ == "__main__":
-    file_upload_app()
+    process_combined_files_with_job_content()
