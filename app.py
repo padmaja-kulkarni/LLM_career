@@ -5,7 +5,7 @@ from utils.llm_utils import load_config
 from utils.file_processing import extract_text_from_file
 from utils.llm_utils import customize_resume
 from utils.llm_utils import generate_mock_questions, parse_questions, evaluate_answer
-
+from utils.voice_utils import record_audio_segment
 
 def record_audio():
     """Capture audio input and convert it to text."""
@@ -24,7 +24,6 @@ def record_audio():
         except Exception as e:
             st.error(f"An error occurred: {e}")
     return ""
-
 
 def interview_preparation(api_key):
     st.header("Interview Preparation")
@@ -51,7 +50,6 @@ def interview_preparation(api_key):
             [st.session_state.get("behavioral_questions", []), st.session_state.get("technical_questions", [])],
             ["Behavioral", "Technical"]
     ):
-
         for i, question in enumerate(question_set):
             st.write(f"Q{i + 1}: {question}")
 
@@ -62,22 +60,39 @@ def interview_preparation(api_key):
             with cols[1]:
                 submit_clicked = st.button(f"Submit Answer for Q{i + 1}", key=f"submit_{i}_{label}")
 
-            user_answer = ""
+            # Initialize the answer in session state
+            if f"combined_answer_{i}_{label}" not in st.session_state:
+                st.session_state[f"combined_answer_{i}_{label}"] = ""
+
+            # Handle "Record Answer" functionality
             if record_clicked:
-                user_answer = record_audio()
-                st.text_area(f"Your Recorded Answer for Q{i + 1}:", user_answer, key=f"recorded_answer_{i}_{label}")
-            else:
-                user_answer = st.text_area(f"Your Answer for Q{i + 1}:", key=f"answer_{i}_{label}")
+                recorded_text = record_audio()
+                # Append recorded text to the current text in the box
+                st.session_state[f"combined_answer_{i}_{label}"] += f" {recorded_text}".strip()
 
+            # Display a single text area for both audio and manual input
+            combined_answer = st.text_area(
+                f"Your Answer for Q{i + 1}:",
+                value=st.session_state[f"combined_answer_{i}_{label}"],
+                key=f"combined_answer_{i}_{label}",
+                height=100
+            )
+
+            # Update session state when manual edits are made
+            if combined_answer != st.session_state[f"combined_answer_{i}_{label}"]:
+                st.session_state[f"combined_answer_{i}_{label}"] = combined_answer
+
+            # Handle "Submit Answer" functionality
             if submit_clicked:
-                feedback = evaluate_answer(question, user_answer, api_key)
-                st.text_area(f"Feedback for Q{i + 1}:", feedback)
+                if combined_answer.strip():
+                    feedback = evaluate_answer(question, combined_answer, api_key)
+                    st.text_area(f"Feedback for Q{i + 1}:", feedback, height=100)
 
-                # Parse score from feedback (if included)
-                score = int(feedback.split("Score: ")[-1].split("/")[0]) if "Score:" in feedback else None
-                save_progress(question, user_answer, feedback, score)
-
-
+                    # Save progress
+                    score = int(feedback.split("Score: ")[-1].split("/")[0]) if "Score:" in feedback else None
+                    save_progress(question, combined_answer, feedback, score)
+                else:
+                    st.warning("Please provide an answer before submitting.")
 
 
 def main():
@@ -85,6 +100,7 @@ def main():
     st.sidebar.title("Navigation")
     section = st.sidebar.radio("Choose Section", ["Resume Customization", "Interview Preparation"])
     api_key = load_config()
+
     if not api_key:
         st.sidebar.text_input("OpenAI API Key", type="password")
 
@@ -110,7 +126,6 @@ def main():
             if st.button("Customize Resume"):
                 customized_resume = customize_resume(job_description, resume_content, api_key)
                 st.text_area("Customized Resume:", customized_resume, height=300)
-
 
 if __name__ == "__main__":
     create_database()  # Ensure database is created
