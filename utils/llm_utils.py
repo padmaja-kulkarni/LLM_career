@@ -72,7 +72,7 @@ def generate_mock_questions(job_title, api_key):
 
 def evaluate_answer(question, answer, api_key):
     """Evaluate the user's answer and provide feedback."""
-    llm = ChatOpenAI(model_name="gpt-4", openai_api_key=api_key)
+    llm = ChatOpenAI(model_name="gpt-4o-mini", openai_api_key=api_key)
     prompt = f"""
     Evaluate the following answer to the question and provide feedback with a score out of 10:
 

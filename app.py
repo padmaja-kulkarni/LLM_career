@@ -70,15 +70,19 @@ def interview_preparation(api_key):
                 # Append recorded text to the current text in the box
                 st.session_state[f"combined_answer_{i}_{label}"] += f" {recorded_text}".strip()
 
-            # Display a single text area for both audio and manual input
+            # Ensure the session state is initialized only once
+            if f"combined_answer_{i}_{label}" not in st.session_state:
+                st.session_state[f"combined_answer_{i}_{label}"] = ""
+
+            # Display the text area without directly passing session state as `value`
             combined_answer = st.text_area(
                 f"Your Answer for Q{i + 1}:",
-                value=st.session_state[f"combined_answer_{i}_{label}"],
-                key=f"combined_answer_{i}_{label}",
+                value=st.session_state[f"combined_answer_{i}_{label}"],  # Initialize once
+                key=f"textarea_{i}_{label}",  # Unique key to avoid conflicts
                 height=100
             )
 
-            # Update session state when manual edits are made
+            # Synchronize manual edits back to session state
             if combined_answer != st.session_state[f"combined_answer_{i}_{label}"]:
                 st.session_state[f"combined_answer_{i}_{label}"] = combined_answer
 
