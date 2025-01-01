@@ -24,11 +24,76 @@ def record_audio():
         except Exception as e:
             st.error(f"An error occurred: {e}")
     return ""
+def custom_interview_prep(api_key):
+    st.header("Custom Interview Preparation")
 
+    job_title = st.text_input("Enter Job Title:")
+
+    # Initialize session state for questions
+    if "custom_questions" not in st.session_state:
+        st.session_state.custom_questions = [{
+            "question": "",
+            "answer": "",
+            "feedback": "",
+        }]
+
+    # Display the initial question input section
+    for idx, q_data in enumerate(st.session_state.custom_questions):
+        st.subheader(f"Question {idx + 1}")
+        question = st.text_area(
+            "Enter or Edit Question:",
+            value=q_data["question"],
+            key=f"custom_question_{idx}",
+            height=100
+        )
+
+        # Update session state with the new question value
+        st.session_state.custom_questions[idx]["question"] = question
+
+        # Record audio or input text for answers
+        cols = st.columns(2)
+        with cols[0]:
+            record_clicked = st.button(f"Record Answer for Q{idx + 1}", key=f"record_{idx}")
+        with cols[1]:
+            submit_clicked = st.button(f"Submit Answer for Q{idx + 1}", key=f"submit_{idx}")
+
+        if record_clicked:
+            recorded_text = record_audio()
+            st.session_state.custom_questions[idx]["answer"] += f" {recorded_text}".strip()
+
+        # Input for the answer
+        answer = st.text_area(
+            f"Your Answer for Q{idx + 1}:",
+            value=st.session_state.custom_questions[idx]["answer"],
+            key=f"answer_{idx}",
+            height=100
+        )
+
+        # Update session state with the answer value
+        st.session_state.custom_questions[idx]["answer"] = answer
+
+        # Submit answer and get feedback
+        if submit_clicked:
+            if answer.strip():
+                feedback = evaluate_answer(question, answer, api_key)
+                st.session_state.custom_questions[idx]["feedback"] = feedback
+                st.text_area(f"Feedback for Q{idx + 1}:", feedback, height=100)
+
+                # Save progress
+                save_progress(question, answer, feedback, score=None)
+            else:
+                st.warning("Please provide an answer before submitting.")
+
+    # Add a button to insert a new question
+    if st.button("Add Another Question", key="add_question"):
+        st.session_state.custom_questions.append({
+            "question": "",
+            "answer": "",
+            "feedback": "",
+        })
 def interview_preparation(api_key):
     st.header("Interview Preparation")
     job_title = st.text_input("Enter Job Title:")
-
     if st.button("Generate Mock Questions"):
         generated_text = generate_mock_questions(job_title, api_key)
         behavioral_questions, technical_questions = parse_questions(generated_text)
@@ -102,7 +167,7 @@ def interview_preparation(api_key):
 def main():
     st.title("Job Application Helper with Voice Input")
     st.sidebar.title("Navigation")
-    section = st.sidebar.radio("Choose Section", ["Resume Customization", "Interview Preparation"])
+    section = st.sidebar.radio("Choose Section", ["Resume Customization", "Interview Preparation", "Custom Interview Prep"])
     api_key = load_config()
 
     if not api_key:
@@ -114,6 +179,9 @@ def main():
 
     if section == "Interview Preparation":
         interview_preparation(api_key)
+
+    if section == "Custom Interview Prep":
+        custom_interview_prep(api_key)
 
     if section == "Resume Customization":
         st.header("Resume Customization")

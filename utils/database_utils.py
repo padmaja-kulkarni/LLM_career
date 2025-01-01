@@ -20,7 +20,7 @@ def save_progress(question, answer, feedback, score):
     """Save progress to the database."""
     conn = sqlite3.connect("user_progress.db")
     cursor = conn.cursor()
-    cursor.execute(""":q
+    cursor.execute("""
     
         INSERT INTO progress (question, answer, feedback, score) VALUES (?, ?, ?, ?)
     """, (question, answer, feedback, score))
